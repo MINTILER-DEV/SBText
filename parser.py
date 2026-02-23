@@ -36,6 +36,39 @@ class VarExpr(Expr):
 
 
 @dataclass
+class PickRandomExpr(Expr):
+    start: Expr
+    end: Expr
+
+
+@dataclass
+class ListItemExpr(Expr):
+    list_name: str
+    index: Expr
+
+
+@dataclass
+class ListLengthExpr(Expr):
+    list_name: str
+
+
+@dataclass
+class ListContainsExpr(Expr):
+    list_name: str
+    item: Expr
+
+
+@dataclass
+class KeyPressedExpr(Expr):
+    key: Expr
+
+
+@dataclass
+class BuiltinReporterExpr(Expr):
+    kind: str
+
+
+@dataclass
 class UnaryExpr(Expr):
     op: str
     operand: Expr
@@ -81,8 +114,23 @@ class SayStmt(Statement):
 
 
 @dataclass
+class ThinkStmt(Statement):
+    message: Expr
+
+
+@dataclass
+class WaitStmt(Statement):
+    duration: Expr
+
+
+@dataclass
 class RepeatStmt(Statement):
     times: Expr
+    body: list[Statement] = field(default_factory=list)
+
+
+@dataclass
+class ForeverStmt(Statement):
     body: list[Statement] = field(default_factory=list)
 
 
@@ -97,6 +145,128 @@ class IfStmt(Statement):
 class ProcedureCallStmt(Statement):
     name: str
     args: list[Expr] = field(default_factory=list)
+
+
+@dataclass
+class TurnRightStmt(Statement):
+    degrees: Expr
+
+
+@dataclass
+class TurnLeftStmt(Statement):
+    degrees: Expr
+
+
+@dataclass
+class GoToXYStmt(Statement):
+    x: Expr
+    y: Expr
+
+
+@dataclass
+class ChangeXByStmt(Statement):
+    value: Expr
+
+
+@dataclass
+class SetXStmt(Statement):
+    value: Expr
+
+
+@dataclass
+class ChangeYByStmt(Statement):
+    value: Expr
+
+
+@dataclass
+class SetYStmt(Statement):
+    value: Expr
+
+
+@dataclass
+class PointInDirectionStmt(Statement):
+    direction: Expr
+
+
+@dataclass
+class IfOnEdgeBounceStmt(Statement):
+    pass
+
+
+@dataclass
+class ChangeSizeByStmt(Statement):
+    value: Expr
+
+
+@dataclass
+class SetSizeToStmt(Statement):
+    value: Expr
+
+
+@dataclass
+class ShowStmt(Statement):
+    pass
+
+
+@dataclass
+class HideStmt(Statement):
+    pass
+
+
+@dataclass
+class NextCostumeStmt(Statement):
+    pass
+
+
+@dataclass
+class NextBackdropStmt(Statement):
+    pass
+
+
+@dataclass
+class StopStmt(Statement):
+    option: Expr
+
+
+@dataclass
+class AskStmt(Statement):
+    question: Expr
+
+
+@dataclass
+class ResetTimerStmt(Statement):
+    pass
+
+
+@dataclass
+class AddToListStmt(Statement):
+    list_name: str
+    item: Expr
+
+
+@dataclass
+class DeleteOfListStmt(Statement):
+    list_name: str
+    index: Expr
+
+
+@dataclass
+class DeleteAllOfListStmt(Statement):
+    list_name: str
+
+
+@dataclass
+class InsertAtListStmt(Statement):
+    list_name: str
+    item: Expr
+    index: Expr
+
+
+@dataclass
+class ReplaceItemOfListStmt(Statement):
+    list_name: str
+    index: Expr
+    item: Expr
 
 
 @dataclass
@@ -124,10 +294,16 @@ class VariableDecl(Node):
 
 
 @dataclass
+class ListDecl(Node):
+    name: str
+
+
+@dataclass
 class Target(Node):
     name: str
     is_stage: bool
     variables: list[VariableDecl] = field(default_factory=list)
+    lists: list[ListDecl] = field(default_factory=list)
     costumes: list[CostumeDecl] = field(default_factory=list)
     procedures: list[Procedure] = field(default_factory=list)
     scripts: list[EventScript] = field(default_factory=list)
@@ -207,6 +383,11 @@ class Parser:
                 var_name = self._parse_name_token()
                 target.variables.append(VariableDecl(line=var_line, column=var_col, name=var_name))
                 continue
+            if self._match_keyword("list"):
+                list_line, list_col = self._previous().line, self._previous().column
+                list_name = self._parse_name_token()
+                target.lists.append(ListDecl(line=list_line, column=list_col, name=list_name))
+                continue
             if self._match_keyword("costume"):
                 costume_line, costume_col = self._previous().line, self._previous().column
                 path_token = self._consume_type("STRING", "Expected costume path string.")
@@ -218,7 +399,7 @@ class Parser:
             if self._match_keyword("when"):
                 target.scripts.append(self._parse_event_script(self._previous().line, self._previous().column))
                 continue
-            self._error_here("Expected 'var', 'costume', 'define', 'when', or 'end' inside target.")
+            self._error_here("Expected 'var', 'list', 'costume', 'define', 'when', or 'end' inside target.")
         return target
 
     def _parse_procedure(self, line: int, col: int) -> Procedure:
@@ -257,7 +438,7 @@ class Parser:
             raise AssertionError("unreachable")
         self._skip_newlines()
         body = self._parse_statement_block(
-            until_keywords={"when", "define", "var", "costume", "end"},
+            until_keywords={"when", "define", "var", "list", "costume", "end"},
             consume_until=False,
         )
         # Allow optional explicit `end` after event scripts while preserving
@@ -286,21 +467,54 @@ class Parser:
 
     def _parse_statement(self) -> Statement:
         token = self._current()
-        if token.type == "KEYWORD":
-            if token.value == "broadcast":
-                return self._parse_broadcast_stmt()
-            if token.value == "set":
-                return self._parse_set_stmt()
-            if token.value == "change":
-                return self._parse_change_stmt()
-            if token.value == "move":
-                return self._parse_move_stmt()
-            if token.value == "say":
-                return self._parse_say_stmt()
-            if token.value == "repeat":
-                return self._parse_repeat_stmt()
-            if token.value == "if":
-                return self._parse_if_stmt()
+        if self._check_keyword("broadcast"):
+            return self._parse_broadcast_stmt()
+        if self._check_keyword("set"):
+            return self._parse_set_stmt()
+        if self._check_keyword("change"):
+            return self._parse_change_stmt()
+        if self._check_keyword("move"):
+            return self._parse_move_stmt()
+        if self._check_keyword("say"):
+            return self._parse_say_stmt()
+        if self._check_keyword("think"):
+            return self._parse_think_stmt()
+        if self._check_keyword("repeat"):
+            return self._parse_repeat_stmt()
+        if self._check_keyword("forever"):
+            return self._parse_forever_stmt()
+        if self._check_keyword("if"):
+            if self._looks_like_if_on_edge_bounce():
+                return self._parse_if_on_edge_bounce_stmt()
+            return self._parse_if_stmt()
+        if self._check_keyword("turn"):
+            return self._parse_turn_stmt()
+        if self._check_keyword("go"):
+            return self._parse_go_stmt()
+        if self._check_keyword("point"):
+            return self._parse_point_stmt()
+        if self._check_keyword("show"):
+            return self._parse_show_stmt()
+        if self._check_keyword("hide"):
+            return self._parse_hide_stmt()
+        if self._check_keyword("next"):
+            return self._parse_next_stmt()
+        if self._check_keyword("wait"):
+            return self._parse_wait_stmt()
+        if self._check_keyword("stop"):
+            return self._parse_stop_stmt()
+        if self._check_keyword("ask"):
+            return self._parse_ask_stmt()
+        if self._check_keyword("reset"):
+            return self._parse_reset_stmt()
+        if self._check_keyword("add"):
+            return self._parse_add_to_list_stmt()
+        if self._check_keyword("delete"):
+            return self._parse_delete_list_stmt()
+        if self._check_keyword("insert"):
+            return self._parse_insert_list_stmt()
+        if self._check_keyword("replace"):
+            return self._parse_replace_list_stmt()
         if token.type == "IDENT":
             return self._parse_call_stmt()
         self._error_here("Unknown statement.")
@@ -315,6 +529,18 @@ class Parser:
 
     def _parse_set_stmt(self) -> SetVarStmt:
         start = self._consume_keyword("set", "Expected 'set'.")
+        if self._match_keyword("x"):
+            self._consume_keyword("to", "Expected 'to' in 'set x to'.")
+            value = self._parse_wrapped_expression()
+            return SetXStmt(line=start.line, column=start.column, value=value)
+        if self._match_keyword("y"):
+            self._consume_keyword("to", "Expected 'to' in 'set y to'.")
+            value = self._parse_wrapped_expression()
+            return SetYStmt(line=start.line, column=start.column, value=value)
+        if self._match_keyword("size"):
+            self._consume_keyword("to", "Expected 'to' in 'set size to'.")
+            value = self._parse_wrapped_expression()
+            return SetSizeToStmt(line=start.line, column=start.column, value=value)
         var_name = self._parse_variable_field_name()
         self._consume_keyword("to", "Expected 'to' in set statement.")
         value = self._parse_wrapped_expression()
@@ -322,6 +548,18 @@ class Parser:
 
     def _parse_change_stmt(self) -> ChangeVarStmt:
         start = self._consume_keyword("change", "Expected 'change'.")
+        if self._match_keyword("x"):
+            self._consume_keyword("by", "Expected 'by' in 'change x by'.")
+            value = self._parse_wrapped_expression()
+            return ChangeXByStmt(line=start.line, column=start.column, value=value)
+        if self._match_keyword("y"):
+            self._consume_keyword("by", "Expected 'by' in 'change y by'.")
+            value = self._parse_wrapped_expression()
+            return ChangeYByStmt(line=start.line, column=start.column, value=value)
+        if self._match_keyword("size"):
+            self._consume_keyword("by", "Expected 'by' in 'change size by'.")
+            value = self._parse_wrapped_expression()
+            return ChangeSizeByStmt(line=start.line, column=start.column, value=value)
         var_name = self._parse_variable_field_name()
         self._consume_keyword("by", "Expected 'by' in change statement.")
         value = self._parse_wrapped_expression()
@@ -338,6 +576,11 @@ class Parser:
         expr = self._parse_wrapped_expression()
         return SayStmt(line=start.line, column=start.column, message=expr)
 
+    def _parse_think_stmt(self) -> ThinkStmt:
+        start = self._consume_keyword("think", "Expected 'think'.")
+        expr = self._parse_wrapped_expression()
+        return ThinkStmt(line=start.line, column=start.column, message=expr)
+
     def _parse_repeat_stmt(self) -> RepeatStmt:
         start = self._consume_keyword("repeat", "Expected 'repeat'.")
         times = self._parse_wrapped_expression()
@@ -345,6 +588,121 @@ class Parser:
         body = self._parse_statement_block(until_keywords={"end"})
         self._consume_keyword("end", "Expected 'end' to close repeat block.")
         return RepeatStmt(line=start.line, column=start.column, times=times, body=body)
+
+    def _parse_forever_stmt(self) -> ForeverStmt:
+        start = self._consume_keyword("forever", "Expected 'forever'.")
+        self._skip_newlines()
+        body = self._parse_statement_block(until_keywords={"end"})
+        self._consume_keyword("end", "Expected 'end' to close forever block.")
+        return ForeverStmt(line=start.line, column=start.column, body=body)
+
+    def _parse_if_on_edge_bounce_stmt(self) -> IfOnEdgeBounceStmt:
+        start = self._consume_keyword("if", "Expected 'if'.")
+        self._consume_keyword("on", "Expected 'on' in 'if on edge bounce'.")
+        self._consume_keyword("edge", "Expected 'edge' in 'if on edge bounce'.")
+        self._consume_keyword("bounce", "Expected 'bounce' in 'if on edge bounce'.")
+        return IfOnEdgeBounceStmt(line=start.line, column=start.column)
+
+    def _parse_turn_stmt(self) -> Statement:
+        start = self._consume_keyword("turn", "Expected 'turn'.")
+        if self._match_keyword("right"):
+            degrees = self._parse_wrapped_expression()
+            return TurnRightStmt(line=start.line, column=start.column, degrees=degrees)
+        if self._match_keyword("left"):
+            degrees = self._parse_wrapped_expression()
+            return TurnLeftStmt(line=start.line, column=start.column, degrees=degrees)
+        self._error_here("Expected 'right' or 'left' after 'turn'.")
+        raise AssertionError("unreachable")
+
+    def _parse_go_stmt(self) -> Statement:
+        start = self._consume_keyword("go", "Expected 'go'.")
+        self._consume_keyword("to", "Expected 'to' after 'go'.")
+        self._consume_keyword("x", "Expected 'x' in 'go to x ... y ...'.")
+        x_expr = self._parse_wrapped_expression()
+        self._consume_keyword("y", "Expected 'y' in 'go to x ... y ...'.")
+        y_expr = self._parse_wrapped_expression()
+        return GoToXYStmt(line=start.line, column=start.column, x=x_expr, y=y_expr)
+
+    def _parse_point_stmt(self) -> Statement:
+        start = self._consume_keyword("point", "Expected 'point'.")
+        self._consume_keyword("in", "Expected 'in' after 'point'.")
+        self._consume_keyword("direction", "Expected 'direction' after 'point in'.")
+        direction = self._parse_wrapped_expression()
+        return PointInDirectionStmt(line=start.line, column=start.column, direction=direction)
+
+    def _parse_show_stmt(self) -> ShowStmt:
+        start = self._consume_keyword("show", "Expected 'show'.")
+        return ShowStmt(line=start.line, column=start.column)
+
+    def _parse_hide_stmt(self) -> HideStmt:
+        start = self._consume_keyword("hide", "Expected 'hide'.")
+        return HideStmt(line=start.line, column=start.column)
+
+    def _parse_next_stmt(self) -> Statement:
+        start = self._consume_keyword("next", "Expected 'next'.")
+        if self._match_keyword("costume"):
+            return NextCostumeStmt(line=start.line, column=start.column)
+        if self._match_keyword("backdrop"):
+            return NextBackdropStmt(line=start.line, column=start.column)
+        self._error_here("Expected 'costume' or 'backdrop' after 'next'.")
+        raise AssertionError("unreachable")
+
+    def _parse_wait_stmt(self) -> WaitStmt:
+        start = self._consume_keyword("wait", "Expected 'wait'.")
+        duration = self._parse_wrapped_expression()
+        return WaitStmt(line=start.line, column=start.column, duration=duration)
+
+    def _parse_stop_stmt(self) -> StopStmt:
+        start = self._consume_keyword("stop", "Expected 'stop'.")
+        option = self._parse_wrapped_expression()
+        return StopStmt(line=start.line, column=start.column, option=option)
+
+    def _parse_ask_stmt(self) -> AskStmt:
+        start = self._consume_keyword("ask", "Expected 'ask'.")
+        question = self._parse_wrapped_expression()
+        return AskStmt(line=start.line, column=start.column, question=question)
+
+    def _parse_reset_stmt(self) -> ResetTimerStmt:
+        start = self._consume_keyword("reset", "Expected 'reset'.")
+        self._consume_keyword("timer", "Expected 'timer' after 'reset'.")
+        return ResetTimerStmt(line=start.line, column=start.column)
+
+    def _parse_add_to_list_stmt(self) -> AddToListStmt:
+        start = self._consume_keyword("add", "Expected 'add'.")
+        item = self._parse_wrapped_expression()
+        self._consume_keyword("to", "Expected 'to' in list add statement.")
+        list_name = self._parse_list_field_name()
+        return AddToListStmt(line=start.line, column=start.column, list_name=list_name, item=item)
+
+    def _parse_delete_list_stmt(self) -> Statement:
+        start = self._consume_keyword("delete", "Expected 'delete'.")
+        if self._match_keyword("all"):
+            self._consume_keyword("of", "Expected 'of' in 'delete all of [list]'.")
+            list_name = self._parse_list_field_name()
+            return DeleteAllOfListStmt(line=start.line, column=start.column, list_name=list_name)
+        index = self._parse_wrapped_expression()
+        self._consume_keyword("of", "Expected 'of' in list delete statement.")
+        list_name = self._parse_list_field_name()
+        return DeleteOfListStmt(line=start.line, column=start.column, list_name=list_name, index=index)
+
+    def _parse_insert_list_stmt(self) -> InsertAtListStmt:
+        start = self._consume_keyword("insert", "Expected 'insert'.")
+        item = self._parse_wrapped_expression()
+        self._consume_keyword("at", "Expected 'at' in list insert statement.")
+        index = self._parse_wrapped_expression()
+        self._consume_keyword("of", "Expected 'of' in list insert statement.")
+        list_name = self._parse_list_field_name()
+        return InsertAtListStmt(line=start.line, column=start.column, list_name=list_name, item=item, index=index)
+
+    def _parse_replace_list_stmt(self) -> ReplaceItemOfListStmt:
+        start = self._consume_keyword("replace", "Expected 'replace'.")
+        self._consume_keyword("item", "Expected 'item' after 'replace'.")
+        index = self._parse_wrapped_expression()
+        self._consume_keyword("of", "Expected 'of' in list replace statement.")
+        list_name = self._parse_list_field_name()
+        self._consume_keyword("with", "Expected 'with' in list replace statement.")
+        item = self._parse_wrapped_expression()
+        return ReplaceItemOfListStmt(line=start.line, column=start.column, list_name=list_name, index=index, item=item)
 
     def _parse_if_stmt(self) -> IfStmt:
         start = self._consume_keyword("if", "Expected 'if'.")
@@ -423,6 +781,27 @@ class Parser:
         token = self._current()
         if token.type in stop_types:
             self._error_here("Expected expression.")
+        if self._check_keyword("pick"):
+            return self._parse_pick_random_expr()
+        if self._check_keyword("item"):
+            return self._parse_item_of_list_expr()
+        if self._check_keyword("length"):
+            return self._parse_length_expr()
+        if self._check_keyword("key"):
+            return self._parse_key_pressed_expr()
+        if self._check_keyword("answer"):
+            start = self._consume_keyword("answer", "Expected 'answer'.")
+            return BuiltinReporterExpr(line=start.line, column=start.column, kind="answer")
+        if self._check_keyword("mouse"):
+            start = self._consume_keyword("mouse", "Expected 'mouse'.")
+            if self._match_keyword("x"):
+                return BuiltinReporterExpr(line=start.line, column=start.column, kind="mouse_x")
+            if self._match_keyword("y"):
+                return BuiltinReporterExpr(line=start.line, column=start.column, kind="mouse_y")
+            self._error_here("Expected 'x' or 'y' after 'mouse'.")
+        if self._check_keyword("timer"):
+            start = self._consume_keyword("timer", "Expected 'timer'.")
+            return BuiltinReporterExpr(line=start.line, column=start.column, kind="timer")
         if token.type == "NUMBER":
             self._advance()
             value = float(token.value)
@@ -444,9 +823,46 @@ class Parser:
             return expr
         if token.type == "LBRACKET":
             name = self._parse_variable_field_name()
+            if self._match_keyword("contains"):
+                item = self._parse_wrapped_expression()
+                return ListContainsExpr(line=token.line, column=token.column, list_name=name, item=item)
             return VarExpr(line=token.line, column=token.column, name=name)
         self._error_here("Expected expression.")
         raise AssertionError("unreachable")
+
+    def _parse_pick_random_expr(self) -> PickRandomExpr:
+        start = self._consume_keyword("pick", "Expected 'pick'.")
+        self._consume_keyword("random", "Expected 'random' after 'pick'.")
+        low = self._parse_wrapped_expression()
+        self._consume_keyword("to", "Expected 'to' in 'pick random ... to ...'.")
+        high = self._parse_wrapped_expression()
+        return PickRandomExpr(line=start.line, column=start.column, start=low, end=high)
+
+    def _parse_item_of_list_expr(self) -> ListItemExpr:
+        start = self._consume_keyword("item", "Expected 'item'.")
+        index = self._parse_wrapped_expression()
+        self._consume_keyword("of", "Expected 'of' in 'item (...) of [list]'.")
+        list_name = self._parse_list_field_name()
+        return ListItemExpr(line=start.line, column=start.column, list_name=list_name, index=index)
+
+    def _parse_length_expr(self) -> Expr:
+        start = self._consume_keyword("length", "Expected 'length'.")
+        self._consume_keyword("of", "Expected 'of' in 'length of ...'.")
+        if self._check_type("LBRACKET"):
+            list_name = self._parse_list_field_name()
+            return ListLengthExpr(line=start.line, column=start.column, list_name=list_name)
+        self._error_here("Expected list reference after 'length of'.")
+        raise AssertionError("unreachable")
+
+    def _parse_key_pressed_expr(self) -> KeyPressedExpr:
+        start = self._consume_keyword("key", "Expected 'key'.")
+        key_expr = self._parse_wrapped_expression()
+        word = self._current_word()
+        if word in {"pressed", "pressed?"}:
+            self._advance()
+        else:
+            self._error_here("Expected 'pressed?' in key sensing expression.")
+        return KeyPressedExpr(line=start.line, column=start.column, key=key_expr)
 
     def _parse_variable_field_name(self) -> str:
         contents = self._parse_bracket_tokens()
@@ -458,6 +874,15 @@ class Parser:
         name = " ".join(parts).strip()
         if not name:
             self._error_here("Variable name cannot be empty.")
+        return name
+
+    def _parse_list_field_name(self) -> str:
+        contents = self._parse_bracket_tokens()
+        if not contents:
+            self._error_here("List name cannot be empty.")
+        name = " ".join(t.value for t in contents).strip()
+        if not name:
+            self._error_here("List name cannot be empty.")
         return name
 
     def _parse_bracket_text(self) -> str:
@@ -518,6 +943,30 @@ class Parser:
             return token.value
         if token.type == "KEYWORD" and token.value in {"and", "or"}:
             return token.value
+        return None
+
+    def _looks_like_if_on_edge_bounce(self) -> bool:
+        return (
+            self._word_at_offset(0) == "if"
+            and self._word_at_offset(1) == "on"
+            and self._word_at_offset(2) == "edge"
+            and self._word_at_offset(3) == "bounce"
+        )
+
+    def _current_word(self) -> str | None:
+        return self._word_from_token(self._current())
+
+    def _word_at_offset(self, offset: int) -> str | None:
+        idx = self.index + offset
+        if idx >= len(self.tokens):
+            return None
+        return self._word_from_token(self.tokens[idx])
+
+    def _word_from_token(self, token: Token) -> str | None:
+        if token.type == "KEYWORD":
+            return token.value
+        if token.type == "IDENT":
+            return token.value.lower()
         return None
 
     def _check_keyword(self, value: str) -> bool:
