@@ -38,8 +38,6 @@ def analyze(project: Project) -> None:
     if not project.targets:
         raise SemanticError("Project must define at least one target.")
     stage_count = sum(1 for target in project.targets if target.is_stage)
-    if stage_count == 0:
-        raise SemanticError("Project must define a 'stage' block.")
     if stage_count > 1:
         raise SemanticError("Project can only define one stage.")
     names = set()

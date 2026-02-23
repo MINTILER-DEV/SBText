@@ -183,7 +183,7 @@ class Parser:
         return Project(line=line, column=col, targets=targets)
 
     def _parse_sprite(self, line: int, col: int) -> Target:
-        name = self._parse_name_token()
+        name = self._parse_sprite_name_token()
         self._skip_newlines()
         return self._parse_target_body(name=name, is_stage=False, line=line, col=col)
 
@@ -505,6 +505,13 @@ class Parser:
             return token.value
         self._error_here("Expected name.")
         raise AssertionError("unreachable")
+
+    def _parse_sprite_name_token(self) -> str:
+        token = self._current()
+        if token.type == "KEYWORD" and token.value == "stage":
+            self._advance()
+            return "Stage"
+        return self._parse_name_token()
 
     def _as_operator(self, token: Token) -> str | None:
         if token.type == "OP":

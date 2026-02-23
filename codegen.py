@@ -74,6 +74,8 @@ class _ProjectBuilder:
     def build(self) -> tuple[dict, dict[str, bytes]]:
         self.broadcast_ids = self._collect_broadcast_ids()
         ordered_targets = sorted(self.project.targets, key=lambda t: 0 if t.is_stage else 1)
+        if not any(target.is_stage for target in ordered_targets):
+            ordered_targets = [self._synthesized_stage_target(ordered_targets)] + ordered_targets
         targets_json: list[dict] = []
         sprite_layer = 1
         for target in ordered_targets:
@@ -92,6 +94,15 @@ class _ProjectBuilder:
             },
         }
         return project_json, self.assets
+
+    def _synthesized_stage_target(self, existing_targets: list[Target]) -> Target:
+        existing_names = {target.name.lower() for target in existing_targets}
+        stage_name = "Stage"
+        suffix = 1
+        while stage_name.lower() in existing_names:
+            suffix += 1
+            stage_name = f"Stage{suffix}"
+        return Target(line=0, column=0, name=stage_name, is_stage=True)
 
     def _build_target_json(self, target: Target, layer_order: int) -> dict:
         blocks: dict[str, dict] = {}
