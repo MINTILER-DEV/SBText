@@ -260,6 +260,10 @@ class Parser:
             until_keywords={"when", "define", "var", "costume", "end"},
             consume_until=False,
         )
+        # Allow optional explicit `end` after event scripts while preserving
+        # existing open-ended script parsing where target `end` closes the block.
+        if self._check_keyword("end") and self._looks_like_event_end():
+            self._advance()
         return EventScript(line=line, column=col, event_type=event_type, message=message, body=body)
 
     def _parse_statement_block(
@@ -508,6 +512,25 @@ class Parser:
         if token.type == "KEYWORD" and token.value in {"and", "or"}:
             return token.value
         return None
+
+    def _check_keyword(self, value: str) -> bool:
+        token = self._current()
+        return token.type == "KEYWORD" and token.value == value
+
+    def _looks_like_event_end(self) -> bool:
+        # If the next significant token starts a new top-level target or EOF,
+        # treat current `end` as target terminator, not event terminator.
+        idx = self.index + 1
+        while idx < len(self.tokens) and self.tokens[idx].type == "NEWLINE":
+            idx += 1
+        if idx >= len(self.tokens):
+            return False
+        token = self.tokens[idx]
+        if token.type == "EOF":
+            return False
+        if token.type == "KEYWORD" and token.value in {"sprite", "stage"}:
+            return False
+        return True
 
     def _consume_keyword(self, value: str, message: str) -> Token:
         token = self._current()
