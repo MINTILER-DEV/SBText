@@ -3,23 +3,55 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from parser import (
+    AddToListStmt,
     BinaryExpr,
+    BuiltinReporterExpr,
+    ChangeSizeByStmt,
+    ChangeXByStmt,
+    ChangeYByStmt,
     BroadcastStmt,
     ChangeVarStmt,
+    DeleteAllOfListStmt,
+    DeleteOfListStmt,
     EventScript,
     Expr,
+    ForeverStmt,
+    GoToXYStmt,
+    HideStmt,
     IfStmt,
+    IfOnEdgeBounceStmt,
+    InsertAtListStmt,
+    KeyPressedExpr,
+    ListContainsExpr,
+    ListItemExpr,
+    ListLengthExpr,
     MoveStmt,
+    NextBackdropStmt,
+    NextCostumeStmt,
+    PickRandomExpr,
+    PointInDirectionStmt,
     Procedure,
     ProcedureCallStmt,
     Project,
+    ReplaceItemOfListStmt,
+    ResetTimerStmt,
     RepeatStmt,
+    SetSizeToStmt,
+    SetXStmt,
+    SetYStmt,
     SayStmt,
     SetVarStmt,
+    ShowStmt,
     Statement,
+    StopStmt,
     Target,
+    ThinkStmt,
+    TurnLeftStmt,
+    TurnRightStmt,
     UnaryExpr,
     VarExpr,
+    WaitStmt,
+    AskStmt,
 )
 
 
@@ -59,6 +91,15 @@ def _analyze_target(target: Target) -> None:
             )
         variables[lowered] = decl.line
 
+    lists: dict[str, int] = {}
+    for decl in target.lists:
+        lowered = decl.name.lower()
+        if lowered in lists:
+            raise SemanticError(
+                f"Duplicate list '{decl.name}' in target '{target.name}' at line {decl.line}, column {decl.column}."
+            )
+        lists[lowered] = decl.line
+
     procedures: dict[str, ProcedureInfo] = {}
     for procedure in target.procedures:
         lowered = procedure.name.lower()
@@ -79,6 +120,7 @@ def _analyze_target(target: Target) -> None:
             target=target,
             statements=procedure.body,
             variables=variables,
+            lists=lists,
             procedures=procedures,
             param_scope=params,
             current_line=procedure.line,
@@ -90,6 +132,7 @@ def _analyze_target(target: Target) -> None:
             target=target,
             script=script,
             variables=variables,
+            lists=lists,
             procedures=procedures,
         )
 
@@ -98,12 +141,14 @@ def _analyze_event_script(
     target: Target,
     script: EventScript,
     variables: dict[str, int],
+    lists: dict[str, int],
     procedures: dict[str, ProcedureInfo],
 ) -> None:
     _analyze_statements(
         target=target,
         statements=script.body,
         variables=variables,
+        lists=lists,
         procedures=procedures,
         param_scope=set(),
         current_line=script.line,
@@ -115,6 +160,7 @@ def _analyze_statements(
     target: Target,
     statements: list[Statement],
     variables: dict[str, int],
+    lists: dict[str, int],
     procedures: dict[str, ProcedureInfo],
     param_scope: set[str],
     current_line: int,
@@ -128,31 +174,73 @@ def _analyze_statements(
                 )
         elif isinstance(stmt, SetVarStmt):
             _ensure_variable_exists(target, stmt.var_name, variables, param_scope, stmt.line, stmt.column)
-            _analyze_expr(target, stmt.value, variables, param_scope)
+            _analyze_expr(target, stmt.value, variables, lists, param_scope)
         elif isinstance(stmt, ChangeVarStmt):
             _ensure_variable_exists(target, stmt.var_name, variables, param_scope, stmt.line, stmt.column)
-            _analyze_expr(target, stmt.delta, variables, param_scope)
-        elif isinstance(stmt, MoveStmt):
-            _analyze_expr(target, stmt.steps, variables, param_scope)
-        elif isinstance(stmt, SayStmt):
-            _analyze_expr(target, stmt.message, variables, param_scope)
+            _analyze_expr(target, stmt.delta, variables, lists, param_scope)
+        elif isinstance(stmt, (MoveStmt, SayStmt, ThinkStmt, WaitStmt)):
+            expr = stmt.steps if isinstance(stmt, MoveStmt) else stmt.message if isinstance(stmt, (SayStmt, ThinkStmt)) else stmt.duration
+            _analyze_expr(target, expr, variables, lists, param_scope)
+        elif isinstance(stmt, (TurnRightStmt, TurnLeftStmt)):
+            _analyze_expr(target, stmt.degrees, variables, lists, param_scope)
+        elif isinstance(stmt, GoToXYStmt):
+            _analyze_expr(target, stmt.x, variables, lists, param_scope)
+            _analyze_expr(target, stmt.y, variables, lists, param_scope)
+        elif isinstance(stmt, (ChangeXByStmt, ChangeYByStmt, SetXStmt, SetYStmt, PointInDirectionStmt, ChangeSizeByStmt, SetSizeToStmt)):
+            expr = getattr(stmt, "value", None) or getattr(stmt, "direction", None)
+            _analyze_expr(target, expr, variables, lists, param_scope)
+        elif isinstance(stmt, (IfOnEdgeBounceStmt, ShowStmt, HideStmt, NextCostumeStmt, NextBackdropStmt, ResetTimerStmt)):
+            pass
+        elif isinstance(stmt, StopStmt):
+            _analyze_expr(target, stmt.option, variables, lists, param_scope)
+        elif isinstance(stmt, AskStmt):
+            _analyze_expr(target, stmt.question, variables, lists, param_scope)
+        elif isinstance(stmt, AddToListStmt):
+            _ensure_list_exists(target, stmt.list_name, lists, stmt.line, stmt.column)
+            _analyze_expr(target, stmt.item, variables, lists, param_scope)
+        elif isinstance(stmt, DeleteOfListStmt):
+            _ensure_list_exists(target, stmt.list_name, lists, stmt.line, stmt.column)
+            _analyze_expr(target, stmt.index, variables, lists, param_scope)
+        elif isinstance(stmt, DeleteAllOfListStmt):
+            _ensure_list_exists(target, stmt.list_name, lists, stmt.line, stmt.column)
+        elif isinstance(stmt, InsertAtListStmt):
+            _ensure_list_exists(target, stmt.list_name, lists, stmt.line, stmt.column)
+            _analyze_expr(target, stmt.item, variables, lists, param_scope)
+            _analyze_expr(target, stmt.index, variables, lists, param_scope)
+        elif isinstance(stmt, ReplaceItemOfListStmt):
+            _ensure_list_exists(target, stmt.list_name, lists, stmt.line, stmt.column)
+            _analyze_expr(target, stmt.index, variables, lists, param_scope)
+            _analyze_expr(target, stmt.item, variables, lists, param_scope)
         elif isinstance(stmt, RepeatStmt):
-            _analyze_expr(target, stmt.times, variables, param_scope)
+            _analyze_expr(target, stmt.times, variables, lists, param_scope)
             _analyze_statements(
                 target=target,
                 statements=stmt.body,
                 variables=variables,
+                lists=lists,
+                procedures=procedures,
+                param_scope=param_scope,
+                current_line=current_line,
+                scope_name=scope_name,
+            )
+        elif isinstance(stmt, ForeverStmt):
+            _analyze_statements(
+                target=target,
+                statements=stmt.body,
+                variables=variables,
+                lists=lists,
                 procedures=procedures,
                 param_scope=param_scope,
                 current_line=current_line,
                 scope_name=scope_name,
             )
         elif isinstance(stmt, IfStmt):
-            _analyze_expr(target, stmt.condition, variables, param_scope)
+            _analyze_expr(target, stmt.condition, variables, lists, param_scope)
             _analyze_statements(
                 target=target,
                 statements=stmt.then_body,
                 variables=variables,
+                lists=lists,
                 procedures=procedures,
                 param_scope=param_scope,
                 current_line=current_line,
@@ -162,6 +250,7 @@ def _analyze_statements(
                 target=target,
                 statements=stmt.else_body,
                 variables=variables,
+                lists=lists,
                 procedures=procedures,
                 param_scope=param_scope,
                 current_line=current_line,
@@ -184,14 +273,14 @@ def _analyze_statements(
                     f"column {stmt.column} in {scope_name}."
                 )
             for expr in stmt.args:
-                _analyze_expr(target, expr, variables, param_scope)
+                _analyze_expr(target, expr, variables, lists, param_scope)
         else:
             raise SemanticError(
                 f"Unsupported statement type '{type(stmt).__name__}' at line {stmt.line}, column {stmt.column} in target '{target.name}'."
             )
 
 
-def _analyze_expr(target: Target, expr: Expr, variables: dict[str, int], param_scope: set[str]) -> None:
+def _analyze_expr(target: Target, expr: Expr, variables: dict[str, int], lists: dict[str, int], param_scope: set[str]) -> None:
     if isinstance(expr, VarExpr):
         lowered = expr.name.lower()
         if lowered in param_scope:
@@ -202,11 +291,31 @@ def _analyze_expr(target: Target, expr: Expr, variables: dict[str, int], param_s
             )
         return
     if isinstance(expr, UnaryExpr):
-        _analyze_expr(target, expr.operand, variables, param_scope)
+        _analyze_expr(target, expr.operand, variables, lists, param_scope)
         return
     if isinstance(expr, BinaryExpr):
-        _analyze_expr(target, expr.left, variables, param_scope)
-        _analyze_expr(target, expr.right, variables, param_scope)
+        _analyze_expr(target, expr.left, variables, lists, param_scope)
+        _analyze_expr(target, expr.right, variables, lists, param_scope)
+        return
+    if isinstance(expr, PickRandomExpr):
+        _analyze_expr(target, expr.start, variables, lists, param_scope)
+        _analyze_expr(target, expr.end, variables, lists, param_scope)
+        return
+    if isinstance(expr, ListItemExpr):
+        _ensure_list_exists(target, expr.list_name, lists, expr.line, expr.column)
+        _analyze_expr(target, expr.index, variables, lists, param_scope)
+        return
+    if isinstance(expr, ListLengthExpr):
+        _ensure_list_exists(target, expr.list_name, lists, expr.line, expr.column)
+        return
+    if isinstance(expr, ListContainsExpr):
+        _ensure_list_exists(target, expr.list_name, lists, expr.line, expr.column)
+        _analyze_expr(target, expr.item, variables, lists, param_scope)
+        return
+    if isinstance(expr, KeyPressedExpr):
+        _analyze_expr(target, expr.key, variables, lists, param_scope)
+        return
+    if isinstance(expr, BuiltinReporterExpr):
         return
 
 
@@ -226,3 +335,8 @@ def _ensure_variable_exists(
         )
     if lowered not in variables:
         raise SemanticError(f"Unknown variable '{name}' at line {line}, column {column} in target '{target.name}'.")
+
+
+def _ensure_list_exists(target: Target, name: str, lists: dict[str, int], line: int, column: int) -> None:
+    if name.lower() not in lists:
+        raise SemanticError(f"Unknown list '{name}' at line {line}, column {column} in target '{target.name}'.")
