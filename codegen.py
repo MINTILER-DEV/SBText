@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 from parser import (
     BinaryExpr,
@@ -40,10 +42,11 @@ DEFAULT_STAGE_SVG = """<svg xmlns="http://www.w3.org/2000/svg" width="480" heigh
 DEFAULT_SPRITE_SVG = """<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96"><circle cx="48" cy="48" r="40" fill="#4c97ff"/></svg>""".encode(
     "utf-8"
 )
+DEFAULT_SVG_TARGET_SIZE = 64.0
 
 
-def generate_project_json(project: Project, source_dir: Path) -> tuple[dict, dict[str, bytes]]:
-    builder = _ProjectBuilder(project=project, source_dir=source_dir)
+def generate_project_json(project: Project, source_dir: Path, scale_svgs: bool = True) -> tuple[dict, dict[str, bytes]]:
+    builder = _ProjectBuilder(project=project, source_dir=source_dir, scale_svgs=scale_svgs)
     return builder.build()
 
 
@@ -64,9 +67,10 @@ class _ProcedureSignature:
 
 
 class _ProjectBuilder:
-    def __init__(self, project: Project, source_dir: Path) -> None:
+    def __init__(self, project: Project, source_dir: Path, scale_svgs: bool) -> None:
         self.project = project
         self.source_dir = source_dir
+        self.scale_svgs = scale_svgs
         self._id_counter = 0
         self.assets: dict[str, bytes] = {}
         self.broadcast_ids: dict[str, str] = {}
@@ -852,6 +856,8 @@ class _ProjectBuilder:
 
         costume_json: list[dict] = []
         for idx, costume in enumerate(costumes, start=1):
+            rotation_center_x = 0.0
+            rotation_center_y = 0.0
             if costume.path == "__default_stage_backdrop__.svg":
                 data = DEFAULT_STAGE_SVG
                 ext = "svg"
@@ -876,6 +882,9 @@ class _ProjectBuilder:
                 data = file_path.read_bytes()
                 name = file_path.stem
 
+            if ext == "svg":
+                data, rotation_center_x, rotation_center_y = self._prepare_svg(data=data, source_name=costume.path)
+
             digest = hashlib.md5(data).hexdigest()
             md5ext = f"{digest}.{ext}"
             self.assets[md5ext] = data
@@ -884,13 +893,100 @@ class _ProjectBuilder:
                 "assetId": digest,
                 "md5ext": md5ext,
                 "dataFormat": ext,
-                "rotationCenterX": 0,
-                "rotationCenterY": 0,
+                "rotationCenterX": rotation_center_x,
+                "rotationCenterY": rotation_center_y,
             }
             if ext == "png":
                 entry["bitmapResolution"] = 1
             costume_json.append(entry)
         return costume_json
+
+    def _prepare_svg(self, data: bytes, source_name: str) -> tuple[bytes, float, float]:
+        try:
+            root = ET.fromstring(data)
+        except ET.ParseError as exc:
+            raise CodegenError(f"Invalid SVG file '{source_name}': {exc}.") from exc
+
+        min_x, min_y, width, height = self._read_svg_bounds(root, source_name)
+        if self.scale_svgs:
+            root = self._normalize_svg_root(root, min_x, min_y, width, height, DEFAULT_SVG_TARGET_SIZE)
+            centered = DEFAULT_SVG_TARGET_SIZE / 2.0
+            return ET.tostring(root, encoding="utf-8"), centered, centered
+        return ET.tostring(root, encoding="utf-8"), width / 2.0, height / 2.0
+
+    def _normalize_svg_root(
+        self,
+        root: ET.Element,
+        min_x: float,
+        min_y: float,
+        width: float,
+        height: float,
+        target_size: float,
+    ) -> ET.Element:
+        scale_x = target_size / width
+        scale_y = target_size / height
+        transform = (
+            f"translate({self._fmt(-min_x)} {self._fmt(-min_y)}) "
+            f"scale({self._fmt(scale_x)} {self._fmt(scale_y)})"
+        )
+        group_tag = self._svg_tag(root, "g")
+        wrapper = ET.Element(group_tag, {"transform": transform})
+        children = list(root)
+        for child in children:
+            root.remove(child)
+            wrapper.append(child)
+        root.set("viewBox", f"0 0 {self._fmt(target_size)} {self._fmt(target_size)}")
+        root.set("width", self._fmt(target_size))
+        root.set("height", self._fmt(target_size))
+        root.append(wrapper)
+        return root
+
+    def _read_svg_bounds(self, root: ET.Element, source_name: str) -> tuple[float, float, float, float]:
+        view_box = root.get("viewBox")
+        if view_box:
+            parsed = self._parse_view_box(view_box, source_name)
+            if parsed is not None:
+                return parsed
+
+        width = self._parse_svg_length(root.get("width"))
+        height = self._parse_svg_length(root.get("height"))
+        if width is not None and height is not None and width > 0 and height > 0:
+            return 0.0, 0.0, width, height
+        return 0.0, 0.0, DEFAULT_SVG_TARGET_SIZE, DEFAULT_SVG_TARGET_SIZE
+
+    def _parse_view_box(self, view_box: str, source_name: str) -> tuple[float, float, float, float] | None:
+        parts = [piece for piece in re.split(r"[\s,]+", view_box.strip()) if piece]
+        if len(parts) != 4:
+            return None
+        try:
+            min_x, min_y, width, height = (float(piece) for piece in parts)
+        except ValueError as exc:
+            raise CodegenError(f"Invalid SVG viewBox in '{source_name}': '{view_box}'.") from exc
+        if width <= 0 or height <= 0:
+            raise CodegenError(f"SVG viewBox must have positive width/height in '{source_name}'.")
+        return min_x, min_y, width, height
+
+    def _parse_svg_length(self, value: str | None) -> float | None:
+        if value is None:
+            return None
+        match = re.match(r"^\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))", value)
+        if not match:
+            return None
+        number = float(match.group(1))
+        if number <= 0:
+            return None
+        return number
+
+    def _svg_tag(self, root: ET.Element, name: str) -> str:
+        if root.tag.startswith("{") and "}" in root.tag:
+            namespace = root.tag[1 : root.tag.index("}")]
+            return f"{{{namespace}}}{name}"
+        return name
+
+    def _fmt(self, value: float) -> str:
+        if float(value).is_integer():
+            return str(int(value))
+        return f"{value:.6f}".rstrip("0").rstrip(".")
 
     def _collect_broadcast_ids(self) -> dict[str, str]:
         messages: set[str] = set()
