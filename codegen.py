@@ -9,26 +9,58 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 from parser import (
+    AddToListStmt,
     BinaryExpr,
+    BuiltinReporterExpr,
+    ChangeSizeByStmt,
+    ChangeXByStmt,
+    ChangeYByStmt,
     BroadcastStmt,
     ChangeVarStmt,
     CostumeDecl,
+    DeleteAllOfListStmt,
+    DeleteOfListStmt,
     EventScript,
     Expr,
+    ForeverStmt,
+    GoToXYStmt,
+    HideStmt,
     IfStmt,
+    IfOnEdgeBounceStmt,
+    InsertAtListStmt,
+    KeyPressedExpr,
+    ListContainsExpr,
+    ListItemExpr,
+    ListLengthExpr,
     MoveStmt,
+    NextBackdropStmt,
+    NextCostumeStmt,
     NumberExpr,
+    PickRandomExpr,
+    PointInDirectionStmt,
     Procedure,
     ProcedureCallStmt,
     Project,
+    ReplaceItemOfListStmt,
+    ResetTimerStmt,
     RepeatStmt,
+    SetSizeToStmt,
+    SetXStmt,
+    SetYStmt,
     SayStmt,
     SetVarStmt,
+    ShowStmt,
     Statement,
+    StopStmt,
     StringExpr,
     Target,
+    ThinkStmt,
+    TurnLeftStmt,
+    TurnRightStmt,
     UnaryExpr,
     VarExpr,
+    WaitStmt,
+    AskStmt,
 )
 
 
@@ -112,10 +144,16 @@ class _ProjectBuilder:
         blocks: dict[str, dict] = {}
         variables_map: dict[str, str] = {}
         variables_json: dict[str, list] = {}
+        lists_map: dict[str, str] = {}
+        lists_json: dict[str, list] = {}
         for var_decl in target.variables:
             var_id = self._new_id("var")
             variables_map[var_decl.name.lower()] = var_id
             variables_json[var_id] = [var_decl.name, 0]
+        for list_decl in target.lists:
+            list_id = self._new_id("list")
+            lists_map[list_decl.name.lower()] = list_id
+            lists_json[list_id] = [list_decl.name, []]
 
         procedures = self._build_procedure_signatures(target)
         y_cursor = 30
@@ -125,6 +163,7 @@ class _ProjectBuilder:
                 procedure=procedure,
                 signatures=procedures,
                 variables_map=variables_map,
+                lists_map=lists_map,
                 start_y=y_cursor,
             )
             y_cursor += 40
@@ -135,6 +174,7 @@ class _ProjectBuilder:
                 script=script,
                 signatures=procedures,
                 variables_map=variables_map,
+                lists_map=lists_map,
                 start_y=y_cursor,
             )
             y_cursor += 40
@@ -146,7 +186,7 @@ class _ProjectBuilder:
             "isStage": target.is_stage,
             "name": target.name,
             "variables": variables_json,
-            "lists": {},
+            "lists": lists_json,
             "broadcasts": stage_broadcasts,
             "blocks": blocks,
             "comments": {},
@@ -199,6 +239,7 @@ class _ProjectBuilder:
         procedure: Procedure,
         signatures: dict[str, _ProcedureSignature],
         variables_map: dict[str, str],
+        lists_map: dict[str, str],
         start_y: int,
     ) -> int:
         signature = signatures[procedure.name.lower()]
@@ -254,6 +295,7 @@ class _ProjectBuilder:
             statements=procedure.body,
             parent_id=definition_id,
             variables_map=variables_map,
+            lists_map=lists_map,
             signatures=signatures,
             param_scope=set(signature.params),
         )
@@ -268,6 +310,7 @@ class _ProjectBuilder:
         script: EventScript,
         signatures: dict[str, _ProcedureSignature],
         variables_map: dict[str, str],
+        lists_map: dict[str, str],
         start_y: int,
     ) -> int:
         if script.event_type == "when_flag_clicked":
@@ -303,6 +346,7 @@ class _ProjectBuilder:
             statements=script.body,
             parent_id=hat_id,
             variables_map=variables_map,
+            lists_map=lists_map,
             signatures=signatures,
             param_scope=set(),
         )
@@ -317,6 +361,7 @@ class _ProjectBuilder:
         statements: list[Statement],
         parent_id: str,
         variables_map: dict[str, str],
+        lists_map: dict[str, str],
         signatures: dict[str, _ProcedureSignature],
         param_scope: set[str],
     ) -> tuple[str | None, str | None]:
@@ -329,6 +374,7 @@ class _ProjectBuilder:
                 stmt=stmt,
                 parent_id=stmt_parent,
                 variables_map=variables_map,
+                lists_map=lists_map,
                 signatures=signatures,
                 param_scope=param_scope,
             )
@@ -345,25 +391,78 @@ class _ProjectBuilder:
         stmt: Statement,
         parent_id: str,
         variables_map: dict[str, str],
+        lists_map: dict[str, str],
         signatures: dict[str, _ProcedureSignature],
         param_scope: set[str],
     ) -> str:
         if isinstance(stmt, BroadcastStmt):
             return self._emit_broadcast_stmt(blocks, stmt, parent_id)
         if isinstance(stmt, SetVarStmt):
-            return self._emit_set_stmt(blocks, stmt, parent_id, variables_map, param_scope)
+            return self._emit_set_stmt(blocks, stmt, parent_id, variables_map, lists_map, param_scope)
         if isinstance(stmt, ChangeVarStmt):
-            return self._emit_change_stmt(blocks, stmt, parent_id, variables_map, param_scope)
+            return self._emit_change_stmt(blocks, stmt, parent_id, variables_map, lists_map, param_scope)
         if isinstance(stmt, MoveStmt):
-            return self._emit_move_stmt(blocks, stmt, parent_id, variables_map, param_scope)
+            return self._emit_move_stmt(blocks, stmt, parent_id, variables_map, lists_map, param_scope)
         if isinstance(stmt, SayStmt):
-            return self._emit_say_stmt(blocks, stmt, parent_id, variables_map, param_scope)
+            return self._emit_say_stmt(blocks, stmt, parent_id, variables_map, lists_map, param_scope)
+        if isinstance(stmt, ThinkStmt):
+            return self._emit_think_stmt(blocks, stmt, parent_id, variables_map, lists_map, param_scope)
+        if isinstance(stmt, TurnRightStmt):
+            return self._emit_turn_stmt(blocks, "motion_turnright", stmt.degrees, parent_id, variables_map, lists_map, param_scope)
+        if isinstance(stmt, TurnLeftStmt):
+            return self._emit_turn_stmt(blocks, "motion_turnleft", stmt.degrees, parent_id, variables_map, lists_map, param_scope)
+        if isinstance(stmt, GoToXYStmt):
+            return self._emit_go_to_xy_stmt(blocks, stmt, parent_id, variables_map, lists_map, param_scope)
+        if isinstance(stmt, ChangeXByStmt):
+            return self._emit_single_input_stmt(blocks, "motion_changexby", "DX", stmt.value, parent_id, variables_map, lists_map, param_scope, "number")
+        if isinstance(stmt, SetXStmt):
+            return self._emit_single_input_stmt(blocks, "motion_setx", "X", stmt.value, parent_id, variables_map, lists_map, param_scope, "number")
+        if isinstance(stmt, ChangeYByStmt):
+            return self._emit_single_input_stmt(blocks, "motion_changeyby", "DY", stmt.value, parent_id, variables_map, lists_map, param_scope, "number")
+        if isinstance(stmt, SetYStmt):
+            return self._emit_single_input_stmt(blocks, "motion_sety", "Y", stmt.value, parent_id, variables_map, lists_map, param_scope, "number")
+        if isinstance(stmt, PointInDirectionStmt):
+            return self._emit_single_input_stmt(blocks, "motion_pointindirection", "DIRECTION", stmt.direction, parent_id, variables_map, lists_map, param_scope, "number")
+        if isinstance(stmt, IfOnEdgeBounceStmt):
+            return self._emit_no_input_stmt(blocks, "motion_ifonedgebounce", parent_id)
+        if isinstance(stmt, ChangeSizeByStmt):
+            return self._emit_single_input_stmt(blocks, "looks_changesizeby", "CHANGE", stmt.value, parent_id, variables_map, lists_map, param_scope, "number")
+        if isinstance(stmt, SetSizeToStmt):
+            return self._emit_single_input_stmt(blocks, "looks_setsizeto", "SIZE", stmt.value, parent_id, variables_map, lists_map, param_scope, "number")
+        if isinstance(stmt, ShowStmt):
+            return self._emit_no_input_stmt(blocks, "looks_show", parent_id)
+        if isinstance(stmt, HideStmt):
+            return self._emit_no_input_stmt(blocks, "looks_hide", parent_id)
+        if isinstance(stmt, NextCostumeStmt):
+            return self._emit_no_input_stmt(blocks, "looks_nextcostume", parent_id)
+        if isinstance(stmt, NextBackdropStmt):
+            return self._emit_no_input_stmt(blocks, "looks_nextbackdrop", parent_id)
+        if isinstance(stmt, WaitStmt):
+            return self._emit_single_input_stmt(blocks, "control_wait", "DURATION", stmt.duration, parent_id, variables_map, lists_map, param_scope, "number")
+        if isinstance(stmt, ForeverStmt):
+            return self._emit_forever_stmt(blocks, stmt, parent_id, variables_map, lists_map, signatures, param_scope)
+        if isinstance(stmt, StopStmt):
+            return self._emit_stop_stmt(blocks, stmt, parent_id, variables_map, lists_map, param_scope)
+        if isinstance(stmt, AskStmt):
+            return self._emit_single_input_stmt(blocks, "sensing_askandwait", "QUESTION", stmt.question, parent_id, variables_map, lists_map, param_scope, "string")
+        if isinstance(stmt, ResetTimerStmt):
+            return self._emit_no_input_stmt(blocks, "sensing_resettimer", parent_id)
+        if isinstance(stmt, AddToListStmt):
+            return self._emit_add_to_list_stmt(blocks, stmt, parent_id, variables_map, lists_map, param_scope)
+        if isinstance(stmt, DeleteOfListStmt):
+            return self._emit_delete_of_list_stmt(blocks, stmt, parent_id, variables_map, lists_map, param_scope)
+        if isinstance(stmt, DeleteAllOfListStmt):
+            return self._emit_delete_all_of_list_stmt(blocks, stmt, parent_id, lists_map)
+        if isinstance(stmt, InsertAtListStmt):
+            return self._emit_insert_at_list_stmt(blocks, stmt, parent_id, variables_map, lists_map, param_scope)
+        if isinstance(stmt, ReplaceItemOfListStmt):
+            return self._emit_replace_item_of_list_stmt(blocks, stmt, parent_id, variables_map, lists_map, param_scope)
         if isinstance(stmt, RepeatStmt):
-            return self._emit_repeat_stmt(blocks, stmt, parent_id, variables_map, signatures, param_scope)
+            return self._emit_repeat_stmt(blocks, stmt, parent_id, variables_map, lists_map, signatures, param_scope)
         if isinstance(stmt, IfStmt):
-            return self._emit_if_stmt(blocks, stmt, parent_id, variables_map, signatures, param_scope)
+            return self._emit_if_stmt(blocks, stmt, parent_id, variables_map, lists_map, signatures, param_scope)
         if isinstance(stmt, ProcedureCallStmt):
-            return self._emit_call_stmt(blocks, stmt, parent_id, variables_map, signatures, param_scope)
+            return self._emit_call_stmt(blocks, stmt, parent_id, variables_map, lists_map, signatures, param_scope)
         raise CodegenError(f"Unsupported statement type '{type(stmt).__name__}'.")
 
     def _emit_broadcast_stmt(self, blocks: dict[str, dict], stmt: BroadcastStmt, parent_id: str) -> str:
@@ -396,6 +495,7 @@ class _ProjectBuilder:
         stmt: SetVarStmt,
         parent_id: str,
         variables_map: dict[str, str],
+        lists_map: dict[str, str],
         param_scope: set[str],
     ) -> str:
         var_id = self._lookup_var_id(variables_map, stmt.var_name)
@@ -410,6 +510,7 @@ class _ProjectBuilder:
                     expr=stmt.value,
                     parent_id=block_id,
                     variables_map=variables_map,
+                    lists_map=lists_map,
                     param_scope=param_scope,
                     default_kind="number",
                 )
@@ -426,6 +527,7 @@ class _ProjectBuilder:
         stmt: ChangeVarStmt,
         parent_id: str,
         variables_map: dict[str, str],
+        lists_map: dict[str, str],
         param_scope: set[str],
     ) -> str:
         var_id = self._lookup_var_id(variables_map, stmt.var_name)
@@ -440,6 +542,7 @@ class _ProjectBuilder:
                     expr=stmt.delta,
                     parent_id=block_id,
                     variables_map=variables_map,
+                    lists_map=lists_map,
                     param_scope=param_scope,
                     default_kind="number",
                 )
@@ -456,6 +559,7 @@ class _ProjectBuilder:
         stmt: MoveStmt,
         parent_id: str,
         variables_map: dict[str, str],
+        lists_map: dict[str, str],
         param_scope: set[str],
     ) -> str:
         block_id = self._new_block_id()
@@ -469,6 +573,7 @@ class _ProjectBuilder:
                     expr=stmt.steps,
                     parent_id=block_id,
                     variables_map=variables_map,
+                    lists_map=lists_map,
                     param_scope=param_scope,
                     default_kind="number",
                 )
@@ -485,6 +590,7 @@ class _ProjectBuilder:
         stmt: SayStmt,
         parent_id: str,
         variables_map: dict[str, str],
+        lists_map: dict[str, str],
         param_scope: set[str],
     ) -> str:
         block_id = self._new_block_id()
@@ -498,10 +604,151 @@ class _ProjectBuilder:
                     expr=stmt.message,
                     parent_id=block_id,
                     variables_map=variables_map,
+                    lists_map=lists_map,
                     param_scope=param_scope,
                     default_kind="string",
                 )
             },
+            "fields": {},
+            "shadow": False,
+            "topLevel": False,
+        }
+        return block_id
+
+    def _emit_think_stmt(
+        self,
+        blocks: dict[str, dict],
+        stmt: ThinkStmt,
+        parent_id: str,
+        variables_map: dict[str, str],
+        lists_map: dict[str, str],
+        param_scope: set[str],
+    ) -> str:
+        block_id = self._new_block_id()
+        blocks[block_id] = {
+            "opcode": "looks_think",
+            "next": None,
+            "parent": parent_id,
+            "inputs": {
+                "MESSAGE": self._expr_input(
+                    blocks=blocks,
+                    expr=stmt.message,
+                    parent_id=block_id,
+                    variables_map=variables_map,
+                    lists_map=lists_map,
+                    param_scope=param_scope,
+                    default_kind="string",
+                )
+            },
+            "fields": {},
+            "shadow": False,
+            "topLevel": False,
+        }
+        return block_id
+
+    def _emit_turn_stmt(
+        self,
+        blocks: dict[str, dict],
+        opcode: str,
+        value: Expr,
+        parent_id: str,
+        variables_map: dict[str, str],
+        lists_map: dict[str, str],
+        param_scope: set[str],
+    ) -> str:
+        input_name = "DEGREES"
+        return self._emit_single_input_stmt(
+            blocks,
+            opcode,
+            input_name,
+            value,
+            parent_id,
+            variables_map,
+            lists_map,
+            param_scope,
+            "number",
+        )
+
+    def _emit_go_to_xy_stmt(
+        self,
+        blocks: dict[str, dict],
+        stmt: GoToXYStmt,
+        parent_id: str,
+        variables_map: dict[str, str],
+        lists_map: dict[str, str],
+        param_scope: set[str],
+    ) -> str:
+        block_id = self._new_block_id()
+        blocks[block_id] = {
+            "opcode": "motion_gotoxy",
+            "next": None,
+            "parent": parent_id,
+            "inputs": {},
+            "fields": {},
+            "shadow": False,
+            "topLevel": False,
+        }
+        blocks[block_id]["inputs"]["X"] = self._expr_input(
+            blocks=blocks,
+            expr=stmt.x,
+            parent_id=block_id,
+            variables_map=variables_map,
+            lists_map=lists_map,
+            param_scope=param_scope,
+            default_kind="number",
+        )
+        blocks[block_id]["inputs"]["Y"] = self._expr_input(
+            blocks=blocks,
+            expr=stmt.y,
+            parent_id=block_id,
+            variables_map=variables_map,
+            lists_map=lists_map,
+            param_scope=param_scope,
+            default_kind="number",
+        )
+        return block_id
+
+    def _emit_single_input_stmt(
+        self,
+        blocks: dict[str, dict],
+        opcode: str,
+        input_name: str,
+        value: Expr,
+        parent_id: str,
+        variables_map: dict[str, str],
+        lists_map: dict[str, str],
+        param_scope: set[str],
+        default_kind: str,
+    ) -> str:
+        block_id = self._new_block_id()
+        blocks[block_id] = {
+            "opcode": opcode,
+            "next": None,
+            "parent": parent_id,
+            "inputs": {
+                input_name: self._expr_input(
+                    blocks=blocks,
+                    expr=value,
+                    parent_id=block_id,
+                    variables_map=variables_map,
+                    lists_map=lists_map,
+                    param_scope=param_scope,
+                    default_kind=default_kind,
+                )
+            },
+            "fields": {},
+            "shadow": False,
+            "topLevel": False,
+        }
+        return block_id
+
+    def _emit_no_input_stmt(self, blocks: dict[str, dict], opcode: str, parent_id: str) -> str:
+        block_id = self._new_block_id()
+        blocks[block_id] = {
+            "opcode": opcode,
+            "next": None,
+            "parent": parent_id,
+            "inputs": {},
             "fields": {},
             "shadow": False,
             "topLevel": False,
@@ -514,6 +761,7 @@ class _ProjectBuilder:
         stmt: RepeatStmt,
         parent_id: str,
         variables_map: dict[str, str],
+        lists_map: dict[str, str],
         signatures: dict[str, _ProcedureSignature],
         param_scope: set[str],
     ) -> str:
@@ -528,6 +776,7 @@ class _ProjectBuilder:
                     expr=stmt.times,
                     parent_id=block_id,
                     variables_map=variables_map,
+                    lists_map=lists_map,
                     param_scope=param_scope,
                     default_kind="number",
                 )
@@ -542,11 +791,236 @@ class _ProjectBuilder:
             statements=stmt.body,
             parent_id=block_id,
             variables_map=variables_map,
+            lists_map=lists_map,
             signatures=signatures,
             param_scope=param_scope,
         )
         if sub_first is not None:
             block["inputs"]["SUBSTACK"] = [2, sub_first]
+        return block_id
+
+    def _emit_forever_stmt(
+        self,
+        blocks: dict[str, dict],
+        stmt: ForeverStmt,
+        parent_id: str,
+        variables_map: dict[str, str],
+        lists_map: dict[str, str],
+        signatures: dict[str, _ProcedureSignature],
+        param_scope: set[str],
+    ) -> str:
+        block_id = self._new_block_id()
+        block = {
+            "opcode": "control_forever",
+            "next": None,
+            "parent": parent_id,
+            "inputs": {},
+            "fields": {},
+            "shadow": False,
+            "topLevel": False,
+        }
+        blocks[block_id] = block
+        sub_first, _ = self._emit_statement_chain(
+            blocks=blocks,
+            statements=stmt.body,
+            parent_id=block_id,
+            variables_map=variables_map,
+            lists_map=lists_map,
+            signatures=signatures,
+            param_scope=param_scope,
+        )
+        if sub_first is not None:
+            block["inputs"]["SUBSTACK"] = [2, sub_first]
+        return block_id
+
+    def _emit_stop_stmt(
+        self,
+        blocks: dict[str, dict],
+        stmt: StopStmt,
+        parent_id: str,
+        variables_map: dict[str, str],
+        lists_map: dict[str, str],
+        param_scope: set[str],
+    ) -> str:
+        block_id = self._new_block_id()
+        option_literal = self._literal_input(stmt.option)
+        stop_option = "all"
+        if option_literal is not None and option_literal[0] == 10:
+            stop_option = str(option_literal[1])
+        blocks[block_id] = {
+            "opcode": "control_stop",
+            "next": None,
+            "parent": parent_id,
+            "inputs": {},
+            "fields": {"STOP_OPTION": [stop_option, None]},
+            "shadow": False,
+            "topLevel": False,
+            "mutation": {"tagName": "mutation", "children": [], "hasnext": "false"},
+        }
+        return block_id
+
+    def _emit_add_to_list_stmt(
+        self,
+        blocks: dict[str, dict],
+        stmt: AddToListStmt,
+        parent_id: str,
+        variables_map: dict[str, str],
+        lists_map: dict[str, str],
+        param_scope: set[str],
+    ) -> str:
+        list_id = self._lookup_list_id(lists_map, stmt.list_name)
+        block_id = self._new_block_id()
+        blocks[block_id] = {
+            "opcode": "data_addtolist",
+            "next": None,
+            "parent": parent_id,
+            "inputs": {
+                "ITEM": self._expr_input(
+                    blocks=blocks,
+                    expr=stmt.item,
+                    parent_id=block_id,
+                    variables_map=variables_map,
+                    lists_map=lists_map,
+                    param_scope=param_scope,
+                    default_kind="string",
+                )
+            },
+            "fields": {"LIST": [stmt.list_name, list_id]},
+            "shadow": False,
+            "topLevel": False,
+        }
+        return block_id
+
+    def _emit_delete_of_list_stmt(
+        self,
+        blocks: dict[str, dict],
+        stmt: DeleteOfListStmt,
+        parent_id: str,
+        variables_map: dict[str, str],
+        lists_map: dict[str, str],
+        param_scope: set[str],
+    ) -> str:
+        list_id = self._lookup_list_id(lists_map, stmt.list_name)
+        block_id = self._new_block_id()
+        blocks[block_id] = {
+            "opcode": "data_deleteoflist",
+            "next": None,
+            "parent": parent_id,
+            "inputs": {
+                "INDEX": self._expr_input(
+                    blocks=blocks,
+                    expr=stmt.index,
+                    parent_id=block_id,
+                    variables_map=variables_map,
+                    lists_map=lists_map,
+                    param_scope=param_scope,
+                    default_kind="number",
+                )
+            },
+            "fields": {"LIST": [stmt.list_name, list_id]},
+            "shadow": False,
+            "topLevel": False,
+        }
+        return block_id
+
+    def _emit_delete_all_of_list_stmt(
+        self,
+        blocks: dict[str, dict],
+        stmt: DeleteAllOfListStmt,
+        parent_id: str,
+        lists_map: dict[str, str],
+    ) -> str:
+        list_id = self._lookup_list_id(lists_map, stmt.list_name)
+        block_id = self._new_block_id()
+        blocks[block_id] = {
+            "opcode": "data_deletealloflist",
+            "next": None,
+            "parent": parent_id,
+            "inputs": {},
+            "fields": {"LIST": [stmt.list_name, list_id]},
+            "shadow": False,
+            "topLevel": False,
+        }
+        return block_id
+
+    def _emit_insert_at_list_stmt(
+        self,
+        blocks: dict[str, dict],
+        stmt: InsertAtListStmt,
+        parent_id: str,
+        variables_map: dict[str, str],
+        lists_map: dict[str, str],
+        param_scope: set[str],
+    ) -> str:
+        list_id = self._lookup_list_id(lists_map, stmt.list_name)
+        block_id = self._new_block_id()
+        blocks[block_id] = {
+            "opcode": "data_insertatlist",
+            "next": None,
+            "parent": parent_id,
+            "inputs": {},
+            "fields": {"LIST": [stmt.list_name, list_id]},
+            "shadow": False,
+            "topLevel": False,
+        }
+        blocks[block_id]["inputs"]["ITEM"] = self._expr_input(
+            blocks=blocks,
+            expr=stmt.item,
+            parent_id=block_id,
+            variables_map=variables_map,
+            lists_map=lists_map,
+            param_scope=param_scope,
+            default_kind="string",
+        )
+        blocks[block_id]["inputs"]["INDEX"] = self._expr_input(
+            blocks=blocks,
+            expr=stmt.index,
+            parent_id=block_id,
+            variables_map=variables_map,
+            lists_map=lists_map,
+            param_scope=param_scope,
+            default_kind="number",
+        )
+        return block_id
+
+    def _emit_replace_item_of_list_stmt(
+        self,
+        blocks: dict[str, dict],
+        stmt: ReplaceItemOfListStmt,
+        parent_id: str,
+        variables_map: dict[str, str],
+        lists_map: dict[str, str],
+        param_scope: set[str],
+    ) -> str:
+        list_id = self._lookup_list_id(lists_map, stmt.list_name)
+        block_id = self._new_block_id()
+        blocks[block_id] = {
+            "opcode": "data_replaceitemoflist",
+            "next": None,
+            "parent": parent_id,
+            "inputs": {},
+            "fields": {"LIST": [stmt.list_name, list_id]},
+            "shadow": False,
+            "topLevel": False,
+        }
+        blocks[block_id]["inputs"]["INDEX"] = self._expr_input(
+            blocks=blocks,
+            expr=stmt.index,
+            parent_id=block_id,
+            variables_map=variables_map,
+            lists_map=lists_map,
+            param_scope=param_scope,
+            default_kind="number",
+        )
+        blocks[block_id]["inputs"]["ITEM"] = self._expr_input(
+            blocks=blocks,
+            expr=stmt.item,
+            parent_id=block_id,
+            variables_map=variables_map,
+            lists_map=lists_map,
+            param_scope=param_scope,
+            default_kind="string",
+        )
         return block_id
 
     def _emit_if_stmt(
@@ -555,6 +1029,7 @@ class _ProjectBuilder:
         stmt: IfStmt,
         parent_id: str,
         variables_map: dict[str, str],
+        lists_map: dict[str, str],
         signatures: dict[str, _ProcedureSignature],
         param_scope: set[str],
     ) -> str:
@@ -569,6 +1044,7 @@ class _ProjectBuilder:
                     expr=stmt.condition,
                     parent_id=block_id,
                     variables_map=variables_map,
+                    lists_map=lists_map,
                     param_scope=param_scope,
                     default_kind="boolean",
                 )
@@ -583,6 +1059,7 @@ class _ProjectBuilder:
             statements=stmt.then_body,
             parent_id=block_id,
             variables_map=variables_map,
+            lists_map=lists_map,
             signatures=signatures,
             param_scope=param_scope,
         )
@@ -591,6 +1068,7 @@ class _ProjectBuilder:
             statements=stmt.else_body,
             parent_id=block_id,
             variables_map=variables_map,
+            lists_map=lists_map,
             signatures=signatures,
             param_scope=param_scope,
         )
@@ -606,6 +1084,7 @@ class _ProjectBuilder:
         stmt: ProcedureCallStmt,
         parent_id: str,
         variables_map: dict[str, str],
+        lists_map: dict[str, str],
         signatures: dict[str, _ProcedureSignature],
         param_scope: set[str],
     ) -> str:
@@ -620,6 +1099,7 @@ class _ProjectBuilder:
                 expr=arg_expr,
                 parent_id=block_id,
                 variables_map=variables_map,
+                lists_map=lists_map,
                 param_scope=param_scope,
                 default_kind="string",
             )
@@ -647,6 +1127,7 @@ class _ProjectBuilder:
         expr: Expr,
         parent_id: str,
         variables_map: dict[str, str],
+        lists_map: dict[str, str],
         param_scope: set[str],
         default_kind: str,
     ) -> list:
@@ -658,6 +1139,7 @@ class _ProjectBuilder:
             expr=expr,
             parent_id=parent_id,
             variables_map=variables_map,
+            lists_map=lists_map,
             param_scope=param_scope,
         )
         if reporter_id is None:
@@ -670,10 +1152,32 @@ class _ProjectBuilder:
         expr: Expr,
         parent_id: str,
         variables_map: dict[str, str],
+        lists_map: dict[str, str],
         param_scope: set[str],
     ) -> str | None:
         if isinstance(expr, NumberExpr) or isinstance(expr, StringExpr):
             return None
+        if isinstance(expr, BuiltinReporterExpr):
+            opcode_map = {
+                "answer": "sensing_answer",
+                "mouse_x": "sensing_mousex",
+                "mouse_y": "sensing_mousey",
+                "timer": "sensing_timer",
+            }
+            opcode = opcode_map.get(expr.kind)
+            if opcode is None:
+                raise CodegenError(f"Unsupported built-in reporter '{expr.kind}'.")
+            block_id = self._new_block_id()
+            blocks[block_id] = {
+                "opcode": opcode,
+                "next": None,
+                "parent": parent_id,
+                "inputs": {},
+                "fields": {},
+                "shadow": False,
+                "topLevel": False,
+            }
+            return block_id
         if isinstance(expr, VarExpr):
             param_lookup = {name.lower() for name in param_scope}
             lowered = expr.name.lower()
@@ -701,6 +1205,119 @@ class _ProjectBuilder:
                 "topLevel": False,
             }
             return block_id
+        if isinstance(expr, PickRandomExpr):
+            block_id = self._new_block_id()
+            blocks[block_id] = {
+                "opcode": "operator_random",
+                "next": None,
+                "parent": parent_id,
+                "inputs": {},
+                "fields": {},
+                "shadow": False,
+                "topLevel": False,
+            }
+            blocks[block_id]["inputs"]["FROM"] = self._expr_input(
+                blocks=blocks,
+                expr=expr.start,
+                parent_id=block_id,
+                variables_map=variables_map,
+                lists_map=lists_map,
+                param_scope=param_scope,
+                default_kind="number",
+            )
+            blocks[block_id]["inputs"]["TO"] = self._expr_input(
+                blocks=blocks,
+                expr=expr.end,
+                parent_id=block_id,
+                variables_map=variables_map,
+                lists_map=lists_map,
+                param_scope=param_scope,
+                default_kind="number",
+            )
+            return block_id
+        if isinstance(expr, ListItemExpr):
+            block_id = self._new_block_id()
+            list_id = self._lookup_list_id(lists_map, expr.list_name)
+            blocks[block_id] = {
+                "opcode": "data_itemoflist",
+                "next": None,
+                "parent": parent_id,
+                "inputs": {},
+                "fields": {"LIST": [expr.list_name, list_id]},
+                "shadow": False,
+                "topLevel": False,
+            }
+            blocks[block_id]["inputs"]["INDEX"] = self._expr_input(
+                blocks=blocks,
+                expr=expr.index,
+                parent_id=block_id,
+                variables_map=variables_map,
+                lists_map=lists_map,
+                param_scope=param_scope,
+                default_kind="number",
+            )
+            return block_id
+        if isinstance(expr, ListLengthExpr):
+            block_id = self._new_block_id()
+            list_id = self._lookup_list_id(lists_map, expr.list_name)
+            blocks[block_id] = {
+                "opcode": "data_lengthoflist",
+                "next": None,
+                "parent": parent_id,
+                "inputs": {},
+                "fields": {"LIST": [expr.list_name, list_id]},
+                "shadow": False,
+                "topLevel": False,
+            }
+            return block_id
+        if isinstance(expr, ListContainsExpr):
+            block_id = self._new_block_id()
+            list_id = self._lookup_list_id(lists_map, expr.list_name)
+            blocks[block_id] = {
+                "opcode": "data_listcontainsitem",
+                "next": None,
+                "parent": parent_id,
+                "inputs": {},
+                "fields": {"LIST": [expr.list_name, list_id]},
+                "shadow": False,
+                "topLevel": False,
+            }
+            blocks[block_id]["inputs"]["ITEM"] = self._expr_input(
+                blocks=blocks,
+                expr=expr.item,
+                parent_id=block_id,
+                variables_map=variables_map,
+                lists_map=lists_map,
+                param_scope=param_scope,
+                default_kind="string",
+            )
+            return block_id
+        if isinstance(expr, KeyPressedExpr):
+            block_id = self._new_block_id()
+            menu_id = self._new_block_id()
+            blocks[block_id] = {
+                "opcode": "sensing_keypressed",
+                "next": None,
+                "parent": parent_id,
+                "inputs": {"KEY_OPTION": [1, menu_id]},
+                "fields": {},
+                "shadow": False,
+                "topLevel": False,
+            }
+            key_literal = self._literal_input(expr.key)
+            key_value = "space"
+            if key_literal is not None and key_literal[0] == 10:
+                key_value = str(key_literal[1])
+            blocks[menu_id] = {
+                "opcode": "sensing_keyoptions",
+                "next": None,
+                "parent": block_id,
+                "inputs": {},
+                "fields": {"KEY_OPTION": [key_value, None]},
+                "shadow": True,
+                "topLevel": False,
+            }
+            return block_id
         if isinstance(expr, UnaryExpr):
             if expr.op == "-":
                 block_id = self._new_block_id()
@@ -719,6 +1336,7 @@ class _ProjectBuilder:
                     expr=expr.operand,
                     parent_id=block_id,
                     variables_map=variables_map,
+                    lists_map=lists_map,
                     param_scope=param_scope,
                     default_kind="number",
                 )
@@ -735,6 +1353,7 @@ class _ProjectBuilder:
                             expr=expr.operand,
                             parent_id=block_id,
                             variables_map=variables_map,
+                            lists_map=lists_map,
                             param_scope=param_scope,
                             default_kind="boolean",
                         )
@@ -746,7 +1365,7 @@ class _ProjectBuilder:
                 return block_id
             raise CodegenError(f"Unsupported unary operator '{expr.op}'.")
         if isinstance(expr, BinaryExpr):
-            return self._emit_binary_expr(blocks, expr, parent_id, variables_map, param_scope)
+            return self._emit_binary_expr(blocks, expr, parent_id, variables_map, lists_map, param_scope)
         raise CodegenError(f"Unsupported expression type '{type(expr).__name__}'.")
 
     def _emit_binary_expr(
@@ -755,6 +1374,7 @@ class _ProjectBuilder:
         expr: BinaryExpr,
         parent_id: str,
         variables_map: dict[str, str],
+        lists_map: dict[str, str],
         param_scope: set[str],
     ) -> str:
         if expr.op in {"<=", ">="}:
@@ -762,7 +1382,7 @@ class _ProjectBuilder:
             first = BinaryExpr(line=expr.line, column=expr.column, op=op_first, left=expr.left, right=expr.right)
             second = BinaryExpr(line=expr.line, column=expr.column, op="=", left=expr.left, right=expr.right)
             rewritten = BinaryExpr(line=expr.line, column=expr.column, op="or", left=first, right=second)
-            return self._emit_binary_expr(blocks, rewritten, parent_id, variables_map, param_scope)
+            return self._emit_binary_expr(blocks, rewritten, parent_id, variables_map, lists_map, param_scope)
         opcode_map = {
             "+": "operator_add",
             "-": "operator_subtract",
@@ -779,7 +1399,7 @@ class _ProjectBuilder:
         if expr.op == "!=":
             equals_expr = BinaryExpr(line=expr.line, column=expr.column, op="=", left=expr.left, right=expr.right)
             not_expr = UnaryExpr(line=expr.line, column=expr.column, op="not", operand=equals_expr)
-            reporter = self._emit_expr_reporter(blocks, not_expr, parent_id, variables_map, param_scope)
+            reporter = self._emit_expr_reporter(blocks, not_expr, parent_id, variables_map, lists_map, param_scope)
             if reporter is None:
                 raise CodegenError("Failed to emit inequality expression.")
             return reporter
@@ -814,6 +1434,7 @@ class _ProjectBuilder:
             expr=expr.left,
             parent_id=block_id,
             variables_map=variables_map,
+            lists_map=lists_map,
             param_scope=param_scope,
             default_kind=kind,
         )
@@ -822,6 +1443,7 @@ class _ProjectBuilder:
             expr=expr.right,
             parent_id=block_id,
             variables_map=variables_map,
+            lists_map=lists_map,
             param_scope=param_scope,
             default_kind=kind,
         )
@@ -846,6 +1468,12 @@ class _ProjectBuilder:
             raise CodegenError(f"Variable '{var_name}' is not declared.")
         return var_id
 
+    def _lookup_list_id(self, lists_map: dict[str, str], list_name: str) -> str:
+        list_id = lists_map.get(list_name.lower())
+        if list_id is None:
+            raise CodegenError(f"List '{list_name}' is not declared.")
+        return list_id
+
     def _build_costumes(self, target: Target) -> list[dict]:
         costumes = list(target.costumes)
         if not costumes:
@@ -869,7 +1497,12 @@ class _ProjectBuilder:
             else:
                 file_path = Path(costume.path)
                 if not file_path.is_absolute():
-                    file_path = self.source_dir / file_path
+                    candidates = [
+                        self.source_dir / file_path,
+                        self.source_dir.parent / file_path,
+                        Path.cwd() / file_path,
+                    ]
+                    file_path = next((candidate for candidate in candidates if candidate.exists()), candidates[0])
                 if not file_path.exists() or not file_path.is_file():
                     raise CodegenError(
                         f"Costume file not found for target '{target.name}': '{costume.path}' resolved to '{file_path}'."
