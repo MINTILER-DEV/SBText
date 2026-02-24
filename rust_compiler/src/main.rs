@@ -1,17 +1,25 @@
 mod cli;
+mod ast;
 mod imports;
+mod lexer;
+mod parser;
 mod python_backend;
+mod semantic;
 
 use anyhow::Result;
 use clap::Parser;
 use cli::Args;
 use imports::resolve_merged_source;
+use lexer::Lexer;
+use parser::Parser as SbParser;
+use semantic::analyze as semantic_analyze;
 use std::path::PathBuf;
 
 fn main() -> Result<()> {
     let args = Args::parse();
     let input = canonicalize_file(&args.input)?;
     let merged = resolve_merged_source(&input)?;
+    validate_project(&merged)?;
 
     if let Some(emit_path) = args.emit_merged {
         std::fs::write(&emit_path, merged.as_bytes())?;
@@ -29,6 +37,15 @@ fn main() -> Result<()> {
         ));
     }
 
+    Ok(())
+}
+
+fn validate_project(source: &str) -> Result<()> {
+    let mut lexer = Lexer::new(source);
+    let tokens = lexer.tokenize()?;
+    let mut parser = SbParser::new(tokens);
+    let project = parser.parse_project()?;
+    semantic_analyze(&project)?;
     Ok(())
 }
 

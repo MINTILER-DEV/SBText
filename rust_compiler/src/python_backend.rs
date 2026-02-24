@@ -4,7 +4,9 @@ use std::process::Command;
 use tempfile::NamedTempFile;
 
 pub fn compile_with_python(input_path: &Path, merged_source: &str, output_path: &Path, no_svg_scale: bool) -> Result<()> {
-    let mut temp = NamedTempFile::new().context("Failed to create temporary merged source file.")?;
+    let temp_dir = input_path.parent().unwrap_or_else(|| Path::new("."));
+    let mut temp = NamedTempFile::new_in(temp_dir)
+        .context("Failed to create temporary merged source file in input directory.")?;
     std::io::Write::write_all(&mut temp, merged_source.as_bytes())?;
 
     let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
