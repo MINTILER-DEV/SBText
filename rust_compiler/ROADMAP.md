@@ -10,7 +10,7 @@ Current implementation is a transition layer:
 1. Port lexer to Rust (`Token`, `LexerError`, Unicode/BOM handling).
 2. Port parser + AST to Rust (matching current SBText grammar).
 3. Port semantic analysis to Rust (scope tables, list/procedure validation).
-4. Port codegen to Rust (Scratch block JSON + asset packaging + SVG normalization).
+4. [done] Port codegen to Rust (Scratch block JSON + asset packaging + SVG normalization).
 5. Replace Python backend bridge with native Rust backend as default.
 6. Keep Python backend behind `--python-backend` only for parity checks during migration.
 
