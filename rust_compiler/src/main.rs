@@ -28,13 +28,13 @@ fn main() -> Result<()> {
     }
 
     if let Some(output) = args.output {
-        if args.no_python_backend {
+        if args.python_backend {
+            python_backend::compile_with_python(&input, &merged, &output, args.no_svg_scale)?;
+        } else {
             let options = CodegenOptions {
                 scale_svgs: !args.no_svg_scale,
             };
             codegen::write_sb3(&project, &input.parent().unwrap_or(input.as_path()), &output, options)?;
-        } else {
-            python_backend::compile_with_python(&input, &merged, &output, args.no_svg_scale)?;
         }
     }
 

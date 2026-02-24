@@ -25,7 +25,7 @@ pub fn compile_with_python(input_path: &Path, merged_source: &str, output_path: 
     }
 
     let output = cmd.output().context(
-        "Failed to start Python backend. Ensure `python` is available or pass --no-python-backend.",
+        "Failed to start Python backend. Ensure `python` is available or remove --python-backend.",
     )?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
