@@ -19,6 +19,6 @@ pub struct Args {
     #[arg(long, help = "Write merged source after resolving imports to this path.")]
     pub emit_merged: Option<PathBuf>,
 
-    #[arg(long, help = "Do not invoke Python compiler backend. Only resolves/validates imports.")]
+    #[arg(long, help = "Use native Rust backend for .sb3 output instead of Python backend.")]
     pub no_python_backend: bool,
 }
