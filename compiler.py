@@ -29,6 +29,7 @@ import argparse
 from pathlib import Path
 
 from codegen import generate_project_json, write_sb3
+from imports import resolve_project_from_path
 from parser import Parser
 from semantic import analyze
 
@@ -37,6 +38,13 @@ def compile_source(source_text: str, source_dir: Path, output_path: Path, scale_
     project = Parser.from_source(source_text)
     analyze(project)
     project_json, assets = generate_project_json(project, source_dir=source_dir, scale_svgs=scale_svgs)
+    write_sb3(project_json=project_json, assets=assets, output_path=output_path)
+
+
+def compile_file(input_path: Path, output_path: Path, scale_svgs: bool = True) -> None:
+    project = resolve_project_from_path(input_path)
+    analyze(project)
+    project_json, assets = generate_project_json(project, source_dir=input_path.parent, scale_svgs=scale_svgs)
     write_sb3(project_json=project_json, assets=assets, output_path=output_path)
 
 
@@ -61,13 +69,7 @@ def main() -> int:
     if not input_path.exists() or not input_path.is_file():
         raise FileNotFoundError(f"Input file not found: '{input_path}'")
 
-    source_text = input_path.read_text(encoding="utf-8")
-    compile_source(
-        source_text=source_text,
-        source_dir=input_path.parent,
-        output_path=output_path,
-        scale_svgs=not args.no_svg_scale,
-    )
+    compile_file(input_path=input_path, output_path=output_path, scale_svgs=not args.no_svg_scale)
     return 0
 
 
