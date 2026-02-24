@@ -2,8 +2,8 @@
 
 Current implementation is a transition layer:
 
-- Native Rust CLI + import resolver/validator
-- Optional bridge to existing Python backend for `.sb3` emission
+- Native Rust CLI + import resolver/validator + codegen
+- Optional Python backend bridge behind `--python-backend` for parity checks
 
 ## Next steps to become fully Python-free
 
@@ -11,8 +11,8 @@ Current implementation is a transition layer:
 2. Port parser + AST to Rust (matching current SBText grammar).
 3. Port semantic analysis to Rust (scope tables, list/procedure validation).
 4. [done] Port codegen to Rust (Scratch block JSON + asset packaging + SVG normalization).
-5. Replace Python backend bridge with native Rust backend as default.
-6. Keep Python backend behind `--python-backend` only for parity checks during migration.
+5. [done] Replace Python backend bridge with native Rust backend as default.
+6. [done] Keep Python backend behind `--python-backend` only for parity checks during migration.
 
 ## Parity strategy
 

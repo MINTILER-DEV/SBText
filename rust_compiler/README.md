@@ -9,7 +9,8 @@ Current state:
 - Detects circular imports.
 - Enforces imported-file sprite constraints and final duplicate sprite-name constraints.
 - Can emit merged source via `--emit-merged`.
-- Can invoke the existing Python backend for `.sb3` generation (transition mode).
+- Uses native Rust backend for `.sb3` generation by default.
+- Can invoke the existing Python backend with `--python-backend` for parity checks.
 
 ## Build
 
@@ -22,5 +23,6 @@ cargo build --release
 ```bash
 sbtext-rs INPUT OUTPUT
 sbtext-rs INPUT OUTPUT --no-svg-scale
-sbtext-rs INPUT --emit-merged merged.sbtext --no-python-backend
+sbtext-rs INPUT OUTPUT --python-backend
+sbtext-rs INPUT --emit-merged merged.sbtext
 ```
